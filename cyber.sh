@@ -3,8 +3,8 @@
 # Ensure we're running as root
 [[ $(id -u) != 0 ]] && exec sudo originalUser=$(whoami) "./$(basename "$0")"
 
-mkdir /home/"$originalUser"/script-logs
-cd /home/"$originaluser"/script-logs
+mkdir -p script-logs
+cd script-logs
 
 # --- House(MD)keeping ---
 
@@ -112,7 +112,7 @@ EOF
 
 cat > /etc/pam.d/common-auth << EOF
 auth	required	pam_faillock.so preauth audit deny=5
-auth	[success=2 default=ignore]	pam_unix.so nullok
+auth	[success=2 default=ignore]	pam_unix.so
 auth	[default=die]	pam_faillock.so authfail audit deny=5
 auth	requisite	pam_deny.so
 auth	requisite	pam_faillock.so deny=5
@@ -131,6 +131,8 @@ done
 chown root:shadow /etc/shadow;	chmod 600 /etc/shadow
 chown root:root /etc/passwd;	chmod 644 /etc/passwd
 chown root:root /etc/group;	chmod 644 /etc/group
+
+chown root:root /boot/grub/grub.cfg; chmod 600 /boot/grub/grub.cfg
 
 # Crontabs
 for user in $(cut -f1 -d: /etc/passwd); do
@@ -174,6 +176,7 @@ sysctl --system
 
 # Package management
 # TODO: make sure this works
+# it didnt
 packagesToRemove=""
 [ "$ignoreApache" != "true" ] && apt-get autoremove apache2
 [ "$ignoreNginx" != "true" ] && apt-get autoremove nginx
@@ -182,7 +185,7 @@ packagesToRemove=""
 
 distroName = "$(lsb_release -c 2>/dev/null | cut -f2)"
 if [[ "$(lsb_release -a)" =~ "Ubuntu" ]]; then
-	cat >/etc/apt/sources.list << EOF
+	echo \
 	"deb https://archive.ubuntu.com/ubuntu/ "$distroName" main restricted universe multiverse
 	deb-src https://archive.ubuntu.com/ubuntu/ "$distroName" main restricted universe multiverse
 
@@ -193,20 +196,21 @@ if [[ "$(lsb_release -a)" =~ "Ubuntu" ]]; then
 	deb-src https://archive.ubuntu.com/ubuntu/ "$distroName"-security main restricted universe multiverse
 
 	deb https://archive.ubuntu.com/ubuntu/ "$distroName"-backports main restricted universe multiverse
-	deb-src https://archive.ubuntu.com/ubuntu/ "$distroName"-backports main restricted universe multiverse"
-EOF
+	deb-src https://archive.ubuntu.com/ubuntu/ "$distroName"-backports main restricted universe multiverse" > /etc/apt/sources.list
 fi
 
-cat > /etc/apt/apt.conf.d/10periodic << EOF
+echo \
 "APT::Periodic::Update-Package-Lists \"1\";
 APT::Periodic::Download-Upgradeable-Packages \"1\";
 APT::Periodic::AutocleanInterval \"1\";
-APT::Periodic::Unattended-Upgrade \"1\";"
-EOF
+APT::Periodic::Unattended-Upgrade \"1\";" | tee /etc/apt/apt.conf.d/10periodic > /etc/apt/apt.conf.d/20auto-upgrades
 
 for i in wireshark ophcrack john zeitgeist hydra aircrack-ng fcrackzip pdfcrack rarcrack sipcrack irpas xprobe doona; do
 	apt-get autoremove "$i" -y >/dev/null
 done
+
+# because output parsing is hard
+apt-get autoremove $(apt-cache show "*" | grep "Section: games" -B 10 | grep "Package" | cut -d' ' -f2)
 
 # [ -n "$packagesToRemove" ] && apt-get autoremove "$packagesToRemove" -y
 apt-get update && apt-get upgrade -y
