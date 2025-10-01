@@ -1,10 +1,10 @@
 #!/bin/bash
 
-# Ensure we're running as root
-[[ $(id -u) != 0 ]] && exec sudo originalUser=$(whoami) "./$(basename "$0")"
-
 mkdir -p script-logs
 cd script-logs
+
+# Ensure we're running as root
+[[ $(id -u) != 0 ]] && exec sudo originalUser=$(whoami) "./$(basename "$0") | tee script-logs/master.log"
 
 # --- House(MD)keeping ---
 
@@ -180,23 +180,23 @@ sysctl --system
 packagesToRemove=""
 [ "$ignoreApache" != "true" ] && apt-get autoremove apache2
 [ "$ignoreNginx" != "true" ] && apt-get autoremove nginx
-[ "$ignoreFTP" != "true" ] && apt-get autoremove "$(dpkg --get-selections '*sql*' | awk '!/lib/ {print $1}')"
-[ "$ignoreSQL" != "true" ] && apt-get autoremove "$(dpkg --get-selections '*ftp*' | awk '!/lib/ {print $1}')"
+[ "$ignoreFTP" != "true" ] && apt-get autoremove vsftpd
+[ "$ignoreSQL" != "true" ] && apt-get autoremove $(dpkg --get-selections '*sql*' | awk '!/lib/ {print $1}' | tr '\n' ' ')
 
-distroName = "$(lsb_release -c 2>/dev/null | cut -f2)"
+distroName="$(lsb_release -c 2>/dev/null | cut -f2)"
 if [[ "$(lsb_release -a)" =~ "Ubuntu" ]]; then
 	echo \
-	"deb https://archive.ubuntu.com/ubuntu/ "$distroName" main restricted universe multiverse
-	deb-src https://archive.ubuntu.com/ubuntu/ "$distroName" main restricted universe multiverse
+	"deb https://archive.ubuntu.com/ubuntu/ $distroName main restricted universe multiverse
+	deb-src https://archive.ubuntu.com/ubuntu/ $distroName main restricted universe multiverse
 
-	deb https://archive.ubuntu.com/ubuntu/ "$distroName"-updates main restricted universe multiverse
-	deb-src https://archive.ubuntu.com/ubuntu/ "$distroName"-updates main restricted universe multiverse
+	deb https://archive.ubuntu.com/ubuntu/ $distroName-updates main restricted universe multiverse
+	deb-src https://archive.ubuntu.com/ubuntu/ $distroName-updates main restricted universe multiverse
 
-	deb https://archive.ubuntu.com/ubuntu/ "$distroName"-security main restricted universe multiverse
-	deb-src https://archive.ubuntu.com/ubuntu/ "$distroName"-security main restricted universe multiverse
+	deb https://archive.ubuntu.com/ubuntu/ $distroName-security main restricted universe multiverse
+	deb-src https://archive.ubuntu.com/ubuntu/ $distroName-security main restricted universe multiverse
 
-	deb https://archive.ubuntu.com/ubuntu/ "$distroName"-backports main restricted universe multiverse
-	deb-src https://archive.ubuntu.com/ubuntu/ "$distroName"-backports main restricted universe multiverse" > /etc/apt/sources.list
+	deb https://archive.ubuntu.com/ubuntu/ $distroName-backports main restricted universe multiverse
+	deb-src https://archive.ubuntu.com/ubuntu/ $distroName-backports main restricted universe multiverse" > /etc/apt/sources.list
 fi
 
 echo \
