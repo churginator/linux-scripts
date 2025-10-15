@@ -4,7 +4,7 @@ mkdir -p script-logs
 cd script-logs
 
 # Ensure we're running as root
-[[ $(id -u) != 0 ]] && exec sudo originalUser=$(whoami) "./$(basename "$0") | tee script-logs/master.log"
+[[ $(id -u) != 0 ]] && exec sudo originalUser=$(whoami) ../$(basename "$0")
 
 # --- House(MD)keeping ---
 
@@ -82,7 +82,7 @@ done
 
 # Executing this block here leaves empty uids in case we deleted someone we shouldn't have
 for userToDelete in ${badUsers[@]}; do
-	deletedUid = $(id "$userToDelete")
+	deletedUid=$(id "$userToDelete")
 	userdel -r "$userToDelete"
 	echo "Deleted $userToDelete with UID $deletedUid" > users.log
 done
@@ -204,6 +204,9 @@ echo \
 APT::Periodic::Download-Upgradeable-Packages \"1\";
 APT::Periodic::AutocleanInterval \"1\";
 APT::Periodic::Unattended-Upgrade \"1\";" | tee /etc/apt/apt.conf.d/10periodic > /etc/apt/apt.conf.d/20auto-upgrades
+
+# mint wants to be special
+systemctl enable --now mintupdate-automation-upgrade.timer 2>/dev/null
 
 for i in wireshark ophcrack john zeitgeist hydra aircrack-ng fcrackzip pdfcrack rarcrack sipcrack irpas xprobe doona; do
 	apt-get autoremove "$i" -y >/dev/null
