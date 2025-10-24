@@ -84,20 +84,25 @@ done
 for userToDelete in ${badUsers[@]}; do
 	deletedUid=$(id "$userToDelete")
 	userdel -r "$userToDelete"
-	echo "Deleted $userToDelete with UID $deletedUid" > users.log
+	echo "Deleted $userToDelete with UID $deletedUid" >> users.log
 done
 
 for adminToNuke in ${badAdmins[@]}; do
 	gpasswd --delete "$adminToNuke" sudo
-	echo "Removed $userToDelete from group sudo" > users.log
+	echo "Removed $userToDelete from group sudo" >> users.log
 done
 
 # The AFA has thrown a non-root uid 0 user in >=once, this intends to catch it
 userdel -r "$(grep ":0:" /etc/passwd | grep -v "root")" 2>/dev/null
 
 # Password Policy
+
+# mint wants to special and doesnt come with these by default
+apt-get install libpam-cracklib >/dev/null 2>&1
+apt-get install libpam-pwquality >/dev/null 2>&1
+
 # baby's first sed script!
-sed -E -i.orig 's/^PASS_MAX_DAYS.*/PASS_MAX_DAYS=90/; s/^PASS_MIN_DAYS.*/PASS_MIN_DAYS=7/; s/^#?PASS_MIN_LEN.*/PASS_MIN_LEN=12/' /etc/login.defs
+sed -E -i.orig 's/^PASS_MAX_DAYS.*/PASS_MAX_DAYS 90/; s/^PASS_MIN_DAYS.*/PASS_MIN_DAYS 7/; s/^#?PASS_MIN_LEN.*/PASS_MIN_LEN 12/' /etc/login.defs
 
 # lock the root account
 passwd -l root
@@ -137,7 +142,7 @@ chown root:root /boot/grub/grub.cfg; chmod 600 /boot/grub/grub.cfg
 # Crontabs
 for user in $(cut -f1 -d: /etc/passwd); do
 	if crontab -u user -l >/dev/null 2>&1; then
-		echo "$user has a crontab" > cron.log
+		echo "$user has a crontab" >> cron.log
 	fi
 done
 echo "Remember to check /etc/crontab as well" > cron.log
