@@ -1,10 +1,12 @@
 #!/bin/bash
 
+cd "$(dirname "$0")"
 mkdir -p script-logs
 cd script-logs
 
 # Ensure we're running as root
 [[ $(id -u) != 0 ]] && exec sudo originalUser=$(whoami) ../$(basename "$0")
+echo -e "\nBeginning execution at $(date)\n"
 
 # --- House(MD)keeping ---
 
@@ -129,7 +131,7 @@ sed -E -i.orig 's/^#?PermitRootLogin.*/PermitRootLogin no/; s/^#?PermitEmptyPass
 
 # should provide a 13-char password for every user that isn't us
 for passwordChange in $(awk -F: '$3 >= 1000 && $3 <= 60000 && $1 != "nobody" {print $1}' /etc/passwd | grep -v "$originalUser" | tr '\n' ' ' | sed 's/.$//'); do
-	chpasswd <<< ""$passwordChange":cyberPatriot25!"
+	chpasswd <<< ""$passwordChange":"$(head -c 12 /dev/urandom | base64 | tr -d '\n'):3///lY""
 done
 
 # File permissions
@@ -145,16 +147,21 @@ for user in $(cut -f1 -d: /etc/passwd); do
 		echo "$user has a crontab" >> cron.log
 	fi
 done
-echo "Remember to check /etc/crontab as well" > cron.log
+echo "Remember to check /etc/crontab as well" >> cron.log
 
 # LightDM
 echo "allow-guest=false" >> /etc/lightdm/lightdm.conf
-systemctl reload lightdm.service
 
 # kernel parameters
+# TODO: look through the vmem kernel parameters, could be something in there
 cat >> /etc/sysctl.conf << EOF
-kernel.exec-shield=1
-kernel.randomize_va_space=1
+kernel.exec-shield = 1
+kernel.randomize_va_space = 2
+kernel.perf_event_paranoid = 4
+fs.suid_dumpable = 1
+fs.protected_symlinks = 1
+fs.protected_hardlinks = 1
+net.ipv4.ip_forward = 0
 net.ipv4.conf.all.rp_filter = 1
 net.ipv4.conf.default.rp_filter = 1
 net.ipv4.icmp_echo_ignore_broadcasts = 1
@@ -168,7 +175,6 @@ net.ipv4.tcp_syncookies = 1
 net.ipv4.tcp_max_syn_backlog = 2048
 net.ipv4.tcp_synack_retries = 2
 net.ipv4.tcp_syn_retries = 5
-net.ipv4.ip_forward
 net.ipv4.conf.all.log_martians = 1
 net.ipv4.icmp_ignore_bogus_error_responses = 1
 net.ipv4.conf.all.accept_redirects = 0
@@ -183,13 +189,13 @@ sysctl --system
 # TODO: make sure this works
 # it didnt
 packagesToRemove=""
-[ "$ignoreApache" != "true" ] && apt-get autoremove apache2
-[ "$ignoreNginx" != "true" ] && apt-get autoremove nginx
-[ "$ignoreFTP" != "true" ] && apt-get autoremove vsftpd
+[ "$ignoreApache" != "true" ] && apt-get autoremove apache2 -y >/dev/null 2>&1
+[ "$ignoreNginx" != "true" ] && apt-get autoremove nginx -y >/dev/null 2>&1
+[ "$ignoreFTP" != "true" ] && apt-get autoremove vsftpd -y >/dev/null 2>&1
 [ "$ignoreSQL" != "true" ] && apt-get autoremove $(dpkg --get-selections '*sql*' | awk '!/lib/ {print $1}' | tr '\n' ' ')
 
 distroName="$(lsb_release -c 2>/dev/null | cut -f2)"
-if [[ "$(lsb_release -a)" =~ "Ubuntu" ]]; then
+if [[ "$(lsb_release -a 2>/dev/null)" =~ "Ubuntu" ]]; then
 	echo \
 	"deb https://archive.ubuntu.com/ubuntu/ $distroName main restricted universe multiverse
 	deb-src https://archive.ubuntu.com/ubuntu/ $distroName main restricted universe multiverse
@@ -212,9 +218,13 @@ APT::Periodic::Unattended-Upgrade \"1\";" | tee /etc/apt/apt.conf.d/10periodic >
 
 # mint wants to be special
 systemctl enable --now mintupdate-automation-upgrade.timer 2>/dev/null
+gsettings set com.linuxmint.updates autorefresh-days 0 2>/dev/null
+gsettings set com.linuxmint.updates autorefresh-hours 2 2>/dev/null
+gsettings set com.linuxmint.updates autorefresh-minutes 0 2>/dev/null
+gsettings set com.linuxmint.updates refresh-schedule-enabled true 2>/dev/null
 
 for i in wireshark ophcrack john zeitgeist hydra aircrack-ng fcrackzip pdfcrack rarcrack sipcrack irpas xprobe doona; do
-	apt-get autoremove "$i" -y >/dev/null
+	apt-get autoremove "$i" -y >/dev/null 2>&1
 done
 
 # because output parsing is hard
