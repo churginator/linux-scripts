@@ -110,8 +110,8 @@ sed -E -i.orig 's/^PASS_MAX_DAYS.*/PASS_MAX_DAYS 90/; s/^PASS_MIN_DAYS.*/PASS_MI
 passwd -l root
 
 cat > /etc/pam.d/common-password << EOF
-password	requisite	pam_pwquality.so retry=3 minlen=12 ucredit=-1 lcredit=-1 dcredit=-1 ocredit=-1 difork=3
-password 	requisite	pam_pwhistory.so remember=99 use_authok
+password	requisite	pam_pwquality.so retry=3 minlen=12 ucredit=-1 lcredit=-1 dcredit=-1 ocredit=-1 difok=3
+password 	requisite	pam_pwhistory.so remember=99 use_authtok
 password	[success=1 default=ignore] pam_unix.so obscure use_authtok try_first_pass yescrypt
 password	requisite	pam_deny.so
 password	required	pam_permit.so
