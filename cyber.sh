@@ -32,12 +32,20 @@ grep -qi "printing" <<< "$requiredServices" && ignoreCups=true
 
 # nightmare nightmare nightmare
 find / -name "*.mp3" -type f -delete 2>/dev/null
+find /home -name "*.ogg" -type f -delete 2>/dev/null
+find /home -name "*.mp4" -type f -delete 2>/dev/null
 
 # Firewall stuff
 # Interestingly, most times the scoring engine doesn't actually care if the appropriate ports are open, just that the firewall is on
 ufw --force reset
 ufw default deny incoming; ufw default allow outgoing
 ufw logging on; ufw logging high
+
+ufw allow in on lo
+ufw allow out on lo
+ufw deny in from 127.0.0.0/8
+ufw deny in from ::1
+
 ufw enable
 
 #[ "$ignoreApache" == "true" -o "$ignoreNginx" == "true" ] && { ufw allow http; ufw allow https; }
@@ -127,11 +135,46 @@ auth	required	pam_permit.so
 auth	sufficient	pam_faillock.so authsucc audit deny=5
 EOF
 
-sed -E -i.orig 's/^#?PermitRootLogin.*/PermitRootLogin no/; s/^#?PermitEmptyPasswords.*/PermitEmptyPasswords no/' /etc/ssh/sshd_config 2>/dev/null
+chown root:root /etc/ssh/sshd_config
+chmod 0600 /etc/ssh/sshd_config
+
+chown -R root:root /etc/ssh/sshd_config.d/
+chmod -R 0600 /etc/ssh/sshd_config.d/
+
+cp /etc/ssh/sshd_config /etc/ssh/sshd_config.orig
+cat > /etc/ssh/sshd_config << EOF
+Ciphers -3des-cbc,aes128-cbc,aes192-cbc,aes256-cbc,chacha20-poly1305@openssh.com
+DisableForwarding yes
+KexAlgorithms -diffie-hellman-group1-sha1,diffie-hellman-group14-sha1,diffie-hellman-group-exchange-sha1;
+MACs -hmac-md5,hmac-md5-96,hmac-ripemd160,hmac-sha1-96,umac-64@openssh.com,hmac-md5-etm@openssh.com,hmac-md5-96-etm@openssh.com,hmac-ripemd160-etm@openssh.com,hmac-sha1-96-etm@openssh.com,umac-64-etm@openssh.com,umac-128-etm@openssh.com
+Banner /etc/issue
+ClientAliveInterval 15
+ClientAliveCountMax 3
+GSSAPIAuthentication no
+HostbasedAuthentication no
+IgnoreRhosts yes
+LoginGraceTime 60
+LogLevel verbose
+MaxAuthTries 4
+MaxSessions 10
+MaxStartups 10:30:60
+PermitEmptyPasswords no
+PermitRootLogin no
+PermitUserEnvironment no
+UsePAM yes
+EOF
+
+printf "\e[0;31m"
+grep -rPi --color=never -- '^\h*Defaults\h+([^#\n\r]+,\h*)?!use_pty\b' /etc/sudoers*
+grep -r --color=never "^[^#].*NOPASSWD" /etc/sudoers*
+grep -r --color=never "^[^#].*\!authenticate" /etc/sudoers*
+sudo -V | grep --color=never "Authentication timestamp timeout:"
+printf "\e[0m"
 
 # should provide a 13-char password for every user that isn't us
 for passwordChange in $(awk -F: '$3 >= 1000 && $3 <= 60000 && $1 != "nobody" {print $1}' /etc/passwd | grep -v "$originalUser" | tr '\n' ' ' | sed 's/.$//'); do
 	chpasswd <<< ""$passwordChange":"$(head -c 12 /dev/urandom | base64 | tr -d '\n'):3///lY""
+	passwd -m 7 -M 90 "$passwordChange"
 done
 
 # File permissions
@@ -158,10 +201,12 @@ cat >> /etc/sysctl.conf << EOF
 kernel.exec-shield = 1
 kernel.randomize_va_space = 2
 kernel.perf_event_paranoid = 4
+kernel.yama.ptrace_scope = 2
 fs.suid_dumpable = 1
 fs.protected_symlinks = 1
 fs.protected_hardlinks = 1
 net.ipv4.ip_forward = 0
+net.ipv6.conf.all.forwarding = 0
 net.ipv4.conf.all.rp_filter = 1
 net.ipv4.conf.default.rp_filter = 1
 net.ipv4.icmp_echo_ignore_broadcasts = 1
@@ -176,12 +221,17 @@ net.ipv4.tcp_max_syn_backlog = 2048
 net.ipv4.tcp_synack_retries = 2
 net.ipv4.tcp_syn_retries = 5
 net.ipv4.conf.all.log_martians = 1
+net.ipv4.conf.default.log_martians = 1
 net.ipv4.icmp_ignore_bogus_error_responses = 1
 net.ipv4.conf.all.accept_redirects = 0
 net.ipv6.conf.all.accept_redirects = 0
 net.ipv4.conf.default.accept_redirects = 0 
 net.ipv6.conf.default.accept_redirects = 0
+net.ipv4.conf.all.secure_redirects = 0
+net.ipv4.conf.default.secure_redirects = 0
 net.ipv4.icmp_echo_ignore_all = 1
+net.ipv6.conf.all.accept_ra = 0
+net.ipv6.conf.default.accept_ra = 0
 EOF
 sysctl --system
 
