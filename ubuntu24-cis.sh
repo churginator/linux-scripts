@@ -1,11 +1,28 @@
 #!/bin/bash
 # The entire CIS hardening guide for ubuntu 24, in script form
 
-set -euo pipefail
+set -uo pipefail
 
-[[ $(id -u) != 0 ]] && echo "Run as root pls"; exit
+[[ $(id -u) != 0 ]] && echo "Run as root pls" && exit
 
 GRUB_CMDLINE_LINUX=""
+
+# -- :3 --
+printf "\e[0;31m"
+echo "\
+!!!!!ATTENTION!!!!!
+PLEASE VISUDO AND ADD THE FOLLOWING LINES:
+Defaults use_pty
+Defaults logfile=\"/var/log/sudo.log\"
+
+ADDITIONALLY, REMOVE ANY LINES WITH THE FOLLOWING:
+!authenticate
+NOPASSWD
+thanks :333, press enter when done"
+printf "\e[0m"
+
+read
+unset REPLY
 
 # --- Filesystem ---
 echo "install cramfs /bin/false" > /etc/modprobe.d/cramfs.conf
@@ -39,17 +56,20 @@ systemctl unmask tmp.mount 2>/dev/null
 echo "\
 tmpfs   /tmp    tmpfs  defaults,rw,nosuid,nodev,noexec,relatime    0 0" \
 >> /etc/fstab
-mount -o remount /tmp
 
 echo "\
 tmpfs   /dev/shm    tmpfs   defaults,rw,nosuid,nodev,noexec,relatime    0 0" \
 >> /etc/fstab
+
+systemctl daemon-reload
+mount -o remount /tmp
 mount -o remount /dev/shm
 
 # There should be a section here for putting user-writable directories on separate partitions,
 # but that's not practical and i don't care enough to figure it out
 
 # --- AppArmor ---
+apt-get install apparmor apparmor-utils -y >/dev/null
 GRUB_CMDLINE_LINUX=""$GRUB_CMDLINE_LINUX"apparmor=1 security=apparmor"
 aa-enforce /etc/apparmor.d/*
 
@@ -69,10 +89,9 @@ Storage=none
 ProcessSizeMax=0
 EOF
 
-prelink -ua 2>/dev/null
-apt-get purge prelink
+apt-get purge prelink -y >/dev/null
 
-apt-get purge apport
+apt-get purge apport -y >/dev/null
 
 # --- MOTD ---
 rm /etc/motd
@@ -86,13 +105,13 @@ chown root:root $(readlink -e /etc/issue.net)
 chmod u-x,go-wx $(readlink -e /etc/issue.net)
 
 # --- GDM ---
-gsettings set org.gnome.login-screen banner-message-enable true
-gsettings set org.gnome.login-screen banner-message-text 'Authorized uses only. All activity may be monitored and reported'
+gsettings set org.gnome.login-screen banner-message-enable true 2>/dev/null
+gsettings set org.gnome.login-screen banner-message-text 'Authorized users only. All activity may be monitored and reported' 2>/dev/null
 
-gsettings set org.gnome.login-screen disable-user-list true
+gsettings set org.gnome.login-screen disable-user-list true 2>/dev/null
 
-gsettings set org.gnome.desktop.screensaver lock-delay 5
-gsettings set org.gnome.desktop.session idle-delay 900
+gsettings set org.gnome.desktop.screensaver lock-delay 5 2>/dev/null
+gsettings set org.gnome.desktop.session idle-delay 900 2>/dev/null
 
 cat > /etc/dconf/db/local.d/locks/00-screensaver << EOF
 # Lock desktop screensaver settings
@@ -100,8 +119,8 @@ cat > /etc/dconf/db/local.d/locks/00-screensaver << EOF
 /org/gnome/desktop/screensaver/lock-delay
 EOF
 
-gsettings set org.gnome.desktop.media-handling automount false
-gsettings set org.gnome.desktop.media-handling automount-open false
+gsettings set org.gnome.desktop.media-handling automount false 2>/dev/null
+gsettings set org.gnome.desktop.media-handling automount-open false 2>/dev/null
 
 cat > /etc/dconf/db/local.d/locks/00-media-automount << EOF
 [org/gnome/desktop/media-handling]
@@ -124,25 +143,18 @@ if [[ -d /etc/gdm ]]; then
 [xdmcp]
 Enable=false" \
     > /etc/gdm/custom.conf
-else
+elif [[ -d /etc/gdm3 ]]; then
     echo "\
 [xdmcp]
 Enable=false" \
     > /etc/gdm3/custom.conf
 fi
 
-printf "\e[0;31m"
-while IFS= read -r l_file; do
-awk '/\[xdmcp\]/{ f = 1;next } /\[/{ f = 0 } f {if (/^\s*Enable\s*=\s*true/) print "\"'"$l_file"'\" includes: \"" $0 "\" in the \"[xdmcp]\" block"}' "$l_file" \
-done < <(grep -Psil -- '^\h*\[xdmcp\]'
-/etc/{gdm3,gdm}/{custom,daemon}.conf)
-printf "\e[0m"
-
 # -- Services --
-systemctl stop autofs.service
-apt-get purge autofs
+systemctl stop autofs.service 2>/dev/null
+apt-get purge autofs -y >/dev/null
 
-systemctl mask --now avahi-daemon.socket avahi-daemon.service 2>dev/null
+systemctl mask --now avahi-daemon.socket avahi-daemon.service 2>/dev/null
 
 systemctl mask --now isc-dhcp-server.service isc-dhcp-server6.service 2>/dev/null
 
@@ -173,13 +185,13 @@ systemctl mask --now squid.service 2>/dev/null
 systemctl mask --now xinetd.service 2>/dev/null
 
 # -- Client Services --
-apt-get purge nis
-apt-get purge rsh-client
-apt-get purge talk
+apt-get purge nis -y >/dev/null
+apt-get purge rsh-client -y >/dev/null
+apt-get purge talk -y >/dev/null
 
 # -- NTP --
-apt-get purge chrony 2>/dev/null
-apt-get install systemd-timesyncd 2>/dev/null
+apt-get purge chrony -y >/dev/null
+apt-get install systemd-timesyncd -y >/dev/null
 
 cat > /etc/systemd/timesyncd.conf << EOF
 [Time]
@@ -208,7 +220,7 @@ chmod og-rwx /etc/cron.monthly/
 chown root:root /etc/cron.d/
 chmod og-rwx /etc/cron.d/
 
-apt-get purge at 2>/dev/null
+apt-get purge at >/dev/null
 
 # -- Network --
 systemctl mask --now bluetooth.service
@@ -220,7 +232,7 @@ echo "install rds /bin/false" > /etc/modprobe.d/rds.conf
 echo "install sctp /bin/false" > /etc/modprobe.d/sctp.conf
 
 # -- Firewall --
-apt-get purge iptables-persistent
+apt-get purge iptables-persistent >/dev/null
 
 # -- ssh --
 chmod 0600 /etc/ssh/sshd_config
@@ -257,20 +269,28 @@ s/^#?PermitUserEnvironment.*/PermitUserEnvironment no/;
 s/^#?UsePAM.*/UsePAM yes/;' /etc/ssh/sshd_config 2>/dev/null
 
 echo -n "su allowed line in pam: "
-grep -Pi '^\h*auth\h+(?:required|requisite)\h+pam_wheel\.so\h+(?:[^#\n\r]+\h+)?((?!\2)(use_uid\b|group=\H+\b))\h+(?:[^#\n\r]+\h+)?((?!\1)(use_uid\b|group=\H+\b))(\h+.*)?$' /etc/pam.d/su
-
+grep -Pi '^\h*auth\h+(?:required|requisite)\h+pam_wheel\.so\h+(?:[^#\n\r]+\h+)?((?!\2)(use_uid\b|group=\H+\b))\h+(?:[^#\n\r]+\h+)?((?!\1)(use_uid\b|group=\H+\b))(\h+.*)?$' /etc/pam.d/su || echo
 
 # -- pam --
 pam-auth-update --enable unix
 pam-auth-update --enable faillock
 pam-auth-update --enable faillock_notify
 
+# -- root account --
+sed -Ei '/umask/d' /root/.bashrc
+sed -Ei '/umask/d' /root/.bash_profile
+sed -Ei '/PATH/d' /root/.bashrc
+sed -Ei '/PATH/d' /root/.bash_profile
 
-# .........
+for i in $(awk -F: '$3 < 1000 || $3 >= 60000 {print $1}' /etc/passwd | grep -vE "root|halt|sync|shutdown|nfsnobody" | tr '\n' ' ' | sed 's/.$//'); do
+    usermod -s $(command -v nologin) $i
+done
 
+for i in $(grep nologin /etc/passwd | cut -d: -f1); do
+    passwd -l $i
+done
 
 # -- user environment --
-sed -Ei '/nologin/d' /etc/shells
 cat >> /etc/profile << EOF
 TMOUT=900
 readonly TMOUT
@@ -278,3 +298,302 @@ export TMOUT
 EOF
 
 sed -Ei 's/^UMASK.*/UMASK 027/' /etc/login.defs
+
+# -- journaling --
+systemctl unmask systemd-journald.service
+
+cat > /etc/tmpfiles.d/systemd.conf << EOF
+d /run/user 0755 root root -
+F! /run/utmp 0664 root utmp -
+d /run/systemd/ask-password 0755 root root -
+d /run/systemd/seats 0755 root root -
+d /run/systemd/sessions 0755 root root -
+d /run/systemd/users 0755 root root -
+d /run/systemd/machines 0755 root root -
+d /run/systemd/shutdown 0755 root root -
+d /run/log 0755 root root -
+z /run/log/journal 2755 root systemd-journal - -
+Z /run/log/journal/%m ~2750 root systemd-journal - -
+a+ /run/log/journal    - - - - d:group::r-x,d:group:adm:r-x,group::r-x,group:adm:r-x
+a+ /run/log/journal/%m - - - - d:group:adm:r-x,group:adm:r-x
+a+ /run/log/journal/%m/*.journal* - - - - group:adm:r--
+z /var/log/journal 2755 root systemd-journal - -
+z /var/log/journal/%m 2755 root systemd-journal - -
+z /var/log/journal/%m/system.journal 0640 root systemd-journal - -
+a+ /var/log/journal    - - - - d:group::r-x,d:group:adm:r-x,group::r-x,group:adm:r-x
+a+ /var/log/journal/%m - - - - d:group:adm:r-x,group:adm:r-x
+a+ /var/log/journal/%m/system.journal - - - - group:adm:r--
+d /var/lib/systemd 0755 root root -
+d /var/lib/systemd/coredump 0755 root root 2w
+d /var/lib/systemd/ephemeral-trees 0755 root root 0
+d /var/lib/private 0700 root root -
+d /var/log/private 0700 root root -
+d /var/cache/private 0700 root root -
+C /run/systemd/tpm2-pcr-signature.json 0444 root root - /.extra/tpm2-pcr-signature.json
+C /run/systemd/tpm2-pcr-public-key.pem 0444 root root - /.extra/tpm2-pcr-public-key.pem
+EOF
+
+mkdir -p /etc/systemd/journald.conf.d/
+cat > /etc/systemd/journald.conf.d/99-journald.conf << EOF
+[Journal]
+SystemMaxUse=1G
+SystemMaxFileSize=64M
+SystemKeepFree=500M
+RuntimeMaxUse=200M
+RuntimeKeepFree=50M
+MaxFileSec=1month
+Compress=yes
+Storage=persistent
+EOF
+
+systemctl mask --now rsyslog
+systemctl enable --now systemd-journald.service
+
+# -- auditing --
+apt-get install auditd audispd-plugins -y
+systemctl unmask auditd.service
+systemctl enable --now auditd.service
+
+GRUB_CMDLINE_LINUX="$GRUB_CMDLINE_LINUX audit=1 audit_backlog_limit=8192"
+
+sed -Ei '
+s/^max_log_file.*/max_log_file = 16/;
+s/^max_log_file_action.*/max_log_file_action = 16/;
+s/^disk_full_action.*/disk_full_action = single/;
+s/^disk_error_action.*/disk_error_action = single/;
+s/^max_log_file.*/max_log_file 16/;
+s/^space_left_action.*/space_left_action = single/;
+s/^admin_space_left_action.*/admin_space_left_action = single/;
+s/^space_left_action.*/space_left_action = single/;' /etc/audit/auditd.conf
+
+printf "
+-w /etc/sudoers -p wa -k scope
+-w /etc/sudoers.d -p wa -k scope
+" >> /etc/audit/rules.d/50-scope.rules
+
+printf "
+-a always,exit -F arch=b64 -C euid!=uid -F auid!=unset -S execve -k user_emulation
+-a always,exit -F arch=b32 -C euid!=uid -F auid!=unset -S execve -k user_emulation
+" >> /etc/audit/rules.d/50-user_emulation.rules
+
+printf "
+-w /var/log/sudo.log -p wa -k sudo_log_file
+" >> /etc/audit/rules.d/50-sudo.rules
+
+printf "
+-a always,exit -F arch=b64 -S adjtimex,settimeofday -k time-change
+-a always,exit -F arch=b32 -S adjtimex,settimeofday -k time-change
+-a always,exit -F arch=b64 -S clock_settime -F a0=0x0 -k time-change
+-a always,exit -F arch=b32 -S clock_settime -F a0=0x0 -k time-change
+-w /etc/localtime -p wa -k time-change
+" >> /etc/audit/rules.d/50-time-change.rules
+
+printf "
+-a always,exit -F arch=b64 -S sethostname,setdomainname -k system-locale
+-a always,exit -F arch=b32 -S sethostname,setdomainname -k system-locale
+-w /etc/issue -p wa -k system-locale
+-w /etc/issue.net -p wa -k system-locale
+-w /etc/hosts -p wa -k system-locale
+-w /etc/networks -p wa -k system-locale
+-w /etc/network/ -p wa -k system-locale
+-w /etc/netplan/ -p wa -k system-locale
+" >> /etc/audit/rules.d/50-system_locale.rules
+
+find / -xdev -perm /6000 -type f 2>/dev/null |\
+awk -v UID_MIN=1000 '{print "-a always,exit -F path=" $1 " -F perm=x -F auid>="UID_MIN" -F auid!=unset -k privileged" }' >\
+/etc/audit/rules.d/50-privileged.rules
+
+printf "
+-a always,exit -F arch=b64 -S creat,open,openat,truncate,ftruncate -F exit=-EACCES -F auid>=1000 -F auid!=unset -k access
+-a always,exit -F arch=b64 -S creat,open,openat,truncate,ftruncate -F exit=-EPERM -F auid>=1000 -F auid!=unset -k access
+-a always,exit -F arch=b32 -S creat,open,openat,truncate,ftruncate -F exit=-EACCES -F auid>=1000 -F auid!=unset -k access
+-a always,exit -F arch=b32 -S creat,open,openat,truncate,ftruncate -F exit=-EPERM -F auid>=1000 -F auid!=unset -k access
+" >> /etc/audit/rules.d/50-access.rules
+
+printf "
+-w /etc/group -p wa -k identity
+-w /etc/passwd -p wa -k identity
+-w /etc/gshadow -p wa -k identity
+-w /etc/shadow -p wa -k identity
+-w /etc/security/opasswd -p wa -k identity
+-w /etc/nsswitch.conf -p wa -k identity
+-w /etc/pam.conf -p wa -k identity
+-w /etc/pam.d -p wa -k identity
+" >> /etc/audit/rules.d/50-identity.rules
+
+printf "
+-a always,exit -F arch=b64 -S chmod,fchmod,fchmodat -F auid>=1000 -F auid!=unset -F key=perm_mod
+-a always,exit -F arch=b64 -S chown,fchown,lchown,fchownat -F auid>=1000 -F auid!=unset -F key=perm_mod
+-a always,exit -F arch=b32 -S chmod,fchmod,fchmodat -F auid>=1000 -F auid!=unset -F key=perm_mod
+-a always,exit -F arch=b32 -S lchown,fchown,chown,fchownat -F auid>=1000 -F auid!=unset -F key=perm_mod
+-a always,exit -F arch=b64 -S setxattr,lsetxattr,fsetxattr,removexattr,lremovexattr,fremovexattr -F auid>=1000 -F auid!=unset -F key=perm_mod
+-a always,exit -F arch=b32 -S setxattr,lsetxattr,fsetxattr,removexattr,lremovexattr,fremovexattr -F auid>=1000 -F auid!=unset -F key=perm_mod
+" >> /etc/audit/rules.d/50-perm_mod.rules
+
+printf "
+-a always,exit -F arch=b32 -S mount -F auid>=1000 -F auid!=unset -k mounts
+-a always,exit -F arch=b64 -S mount -F auid>=1000 -F auid!=unset -k mounts
+" >> /etc/audit/rules.d/50-mounts.rules
+
+printf "
+-w /var/run/utmp -p wa -k session
+-w /var/log/wtmp -p wa -k session
+-w /var/log/btmp -p wa -k session
+" >> /etc/audit/rules.d/50-session.rules
+
+printf "
+-w /var/log/lastlog -p wa -k logins
+-w /var/run/faillock -p wa -k logins
+" >> /etc/audit/rules.d/50-login.rules
+
+printf "
+-a always,exit -F arch=b64 -S rename,unlink,unlinkat,renameat -F auid>=1000 -F auid!=unset -F key=delete
+-a always,exit -F arch=b32 -S rename,unlink,unlinkat,renameat -F auid>=1000 -F auid!=unset -F key=delete
+" >> /etc/audit/rules.d/50-delete.rules
+
+printf "
+-w /etc/apparmor/ -p wa -k MAC-policy
+-w /etc/apparmor.d/ -p wa -k MAC-policy
+" >> /etc/audit/rules.d/50-MAC-policy.rules
+
+printf "
+-a always,exit -F path=/usr/bin/chcon -F perm=x -F auid>=1000 -F auid!=unset -k perm_chng
+" >> /etc/audit/rules.d/50-perm_chng.rules
+
+printf "
+-a always,exit -F path=/usr/bin/setfacl -F perm=x -F auid>=1000 -F auid!=unset -k perm_chng
+" >> /etc/audit/rules.d/50-perm_chng.rules
+
+printf "
+-a always,exit -F path=/usr/bin/chacl -F perm=x -F auid>=1000 -F auid!=unset -k perm_chng
+" >> /etc/audit/rules.d/50-perm_chng.rules
+
+printf "
+-a always,exit -F path=/usr/sbin/usermod -F perm=x -F auid>=1000 -F auid!=unset -k usermod
+" >> /etc/audit/rules.d/50-usermod.rules
+
+printf "
+-a always,exit -F arch=b64 -S init_module,finit_module,delete_module,create_module,query_module -F auid>=1000 -F auid!=unset -k kernel_modules
+-a always,exit -F path=/usr/bin/kmod -F perm=x -F auid>=1000 -F auid!=unset -k kernel_modules
+" >> /etc/audit/rules.d/50-kernel_modules.rules
+
+printf '\n%s\n' "-e 2" > /etc/audit/rules.d/99-finalize.rules
+
+augenrules --load
+
+# -- audit file permissions --
+find "$(dirname $(awk -F "=" '/^\s*log_file/ {print $2}' /etc/audit/auditd.conf | xargs))" -type f -perm /0137 -exec chmod u-x,g-wx,o-rwx {} +
+
+find "$(dirname $(awk -F "=" '/^\s*log_file/ {print $2}' /etc/audit/auditd.conf | xargs))" -type f ! -user root -exec chown root {} +
+
+find $(dirname $(awk -F"=" '/^\s*log_file/ {print $2}' /etc/audit/auditd.conf | xargs)) -type f \( ! -group adm -a ! -group root \) -exec chgrp adm {} +
+
+sed -ri 's/^\s*#?\s*log_group\s*=\s*\S+(\s*#.*)?.*$/log_group = adm\1/' /etc/audit/auditd.conf
+
+chmod g-w,o-rwx "$(dirname "$(awk -F= '/^\s*log_file\s*/{print $2}' /etc/audit/auditd.conf | xargs)")"
+
+find /etc/audit/ -type f \( -name '*.conf' -o -name '*.rules' \) -exec chmod u-x,g-wx,o-rwx {} +
+
+find /etc/audit/ -type f \( -name '*.conf' -o -name '*.rules' \) ! -user root -exec chown root {} +
+
+find /etc/audit/ -type f \( -name '*.conf' -o -name '*.rules' \) ! -group root -exec chgrp root {} +
+
+chmod go-w /sbin/auditctl /sbin/aureport /sbin/ausearch /sbin/autrace /sbin/auditd /sbin/augenrules
+
+chown root /sbin/auditctl /sbin/aureport /sbin/ausearch /sbin/autrace /sbin/auditd /sbin/augenrules
+
+chgrp root /sbin/auditctl /sbin/aureport /sbin/ausearch /sbin/autrace /sbin/auditd /sbin/augenrules
+
+# -- AIDE --
+DEBIAN_FRONTEND=noninteractive apt-get install aide aide-common -y >/dev/null
+systemctl enable --now dailyaidecheck.timer
+
+echo \
+'@@ifndef TOPDIR
+@@define TOPDIR /
+@@endif
+
+@@ifndef AIDEDIR
+@@define AIDEDIR /etc/aide
+@@endif
+
+@@ifhost smbserv
+@@define smbactive
+@@endif
+
+# The location of the database to be read.
+database=file:@@{AIDEDIR}/aide.db
+
+# The location of the database to be written.
+database_out=file:aide.db.new
+
+verbose=20
+report_url=stdout
+
+# Rule definition
+All=R+a+sha1+rmd160
+Norm=s+n+b+md5+sha1+rmd160
+
+@@{TOPDIR} Norm
+!@@{TOPDIR}etc/aide
+!@@{TOPDIR}dev
+!@@{TOPDIR}media
+!@@{TOPDIR}mnt
+!@@{TOPDIR}proc
+!@@{TOPDIR}root
+!@@{TOPDIR}sys
+!@@{TOPDIR}tmp
+!@@{TOPDIR}var/log
+!@@{TOPDIR}var/run
+!@@{TOPDIR}usr/portage
+!@@{TOPDIR}var/db/repos/gentoo
+@@ifdef smbactive
+!@@{TOPDIR}etc/smb/private/secrets.tdb
+@@endif
+=@@{TOPDIR}home Norm' > /etc/aide.conf
+
+printf '%s\n' "" "# Audit Tools" "$(readlink -f /sbin/auditctl)
+p+i+n+u+g+s+b+acl+xattrs+sha512" "$(readlink -f /sbin/auditd)
+p+i+n+u+g+s+b+acl+xattrs+sha512" "$(readlink -f /sbin/ausearch)
+p+i+n+u+g+s+b+acl+xattrs+sha512" "$(readlink -f /sbin/aureport)
+p+i+n+u+g+s+b+acl+xattrs+sha512" "$(readlink -f /sbin/autrace)
+p+i+n+u+g+s+b+acl+xattrs+sha512" "$(readlink -f /sbin/augenrules)
+p+i+n+u+g+s+b+acl+xattrs+sha512" >> /etc/aide/aide.conf
+
+# only slightly confusing line
+echo "GRUB_CMDLINE_LINUX=\"$GRUB_CMDLINE_LINUX\"" >> /etc/default/grub
+update-grub
+
+# -- file permissions --
+for i in /etc/passwd /etc/passwd- /etc/group /etc/group- /etc/shells; do
+    chmod 0644 $i
+    chown root:root $i
+done
+
+for i in /etc/shadow /etc/shadow- /etc/gshadow /etc/gshadow- /etc/security/opasswd; do
+    chmod 0600 $i
+    chown root:root $i
+done
+
+find / -xdev -not -type l -perm -o+w -type d -exec chmod a+t \{\} \+
+
+printf "\e[0;31m"
+echo -e "\nworld writable files:"
+find / -xdev -type f -perm -o+w -not -type l 2>/dev/null
+
+echo -e "\nfiles with no user or group:"
+find / -xdev -nouser -o -nogroup 2>/dev/null
+
+echo -e "\nSUID/GUID files:"
+find / -xdev -perm /6000 2>/dev/null
+printf "\e[0m"
+
+# -- users --
+pwconv
+
+for stupid in $(awk -F: '($2 == "" ) { print $1 }' /etc/shadow); do
+    passwd -l $stupid
+done
+
+sed -ri 's/(^shadow:[^:]*:[^:]*:)([^:]+$)/\1/' /etc/group
+grpck
