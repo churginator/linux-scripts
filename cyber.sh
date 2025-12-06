@@ -35,6 +35,9 @@ find / -name "*.mp3" -type f -delete 2>/dev/null
 find /home -name "*.ogg" -type f -delete 2>/dev/null
 find /home -name "*.mp4" -type f -delete 2>/dev/null
 
+# next time run touch /var/lib/dpkg/info/*.list pls <3
+ls -lahFt --full-time /var/lib/dpkg/info/*.list > packages-beforeupdate.log
+
 # Firewall stuff
 # Interestingly, most times the scoring engine doesn't actually care if the appropriate ports are open, just that the firewall is on
 ufw --force reset
@@ -62,6 +65,7 @@ currentAdmins=$(getent group sudo | cut -d: -f4 | tr ',' ' ')
 read -r -a badAdmins <<< "$currentAdmins"
 
 # is this performant? no, but we don't care
+# and unreadable too!
 for confirmedOGUser in "${authorizedUsers[@]}"; do
         for i in "${!badUsers[@]}"; do
                 if [[ ${badUsers[i]} = $confirmedOGUser ]]; then
@@ -102,14 +106,22 @@ for adminToNuke in ${badAdmins[@]}; do
 	echo "Removed $userToDelete from group sudo" >> users.log
 done
 
-# The AFA has thrown a non-root uid 0 user in >=once, this intends to catch it
+# non-root uid/gid 0 users/groups
 userdel -r "$(grep ":0:" /etc/passwd | grep -v "root")" 2>/dev/null
+groupdel "$(grep ":0:" /etc/group | grep -v "root")" 2>/dev/null
+
+usermod -u 0 root
+usermod -g 0 root
+groupmod -g 0 root
 
 # Password Policy
 
 # mint wants to special and doesnt come with these by default
+echo "if the script hangs here, wait a minute and press ENTER"
+DEBIAN_FRONTEND=noninteractive
 apt-get install libpam-cracklib >/dev/null 2>&1
 apt-get install libpam-pwquality >/dev/null 2>&1
+unset DEBIAN_FRONTEND
 
 # baby's first sed script!
 sed -E -i.orig 's/^PASS_MAX_DAYS.*/PASS_MAX_DAYS 90/; s/^PASS_MIN_DAYS.*/PASS_MIN_DAYS 7/; s/^#?PASS_MIN_LEN.*/PASS_MIN_LEN 12/' /etc/login.defs
@@ -273,12 +285,26 @@ gsettings set com.linuxmint.updates autorefresh-hours 2 2>/dev/null
 gsettings set com.linuxmint.updates autorefresh-minutes 0 2>/dev/null
 gsettings set com.linuxmint.updates refresh-schedule-enabled true 2>/dev/null
 
+# untested
+if [[ "$ignoreFTP" ]]; then
+	for i in $(find / -name "ftp" -type d); do
+		find "$i" -type d -execdir chmod 0755 \{\} \+
+	done
+fi
+
+if [[ "$ignoreApache" || "$ignoreNginx" ]]; then
+	for i in $(find / -name "http" -type d); do
+		find "$i" -type d -execdir chmod 0755 \{\} \+
+	done
+fi
+
 for i in wireshark ophcrack john zeitgeist hydra aircrack-ng fcrackzip pdfcrack rarcrack sipcrack irpas xprobe doona; do
 	apt-get autoremove "$i" -y >/dev/null 2>&1
 done
 
 # because output parsing is hard
-apt-get autoremove $(apt-cache show "*" | grep "Section: games" -B 10 | grep "Package" | cut -d' ' -f2)
+apt-get autoremove $(apt-cache show "*" | grep -E "Section: games|Section: universe/games" -B 10 | grep "Package" | cut -d' ' -f2)
 
 # [ -n "$packagesToRemove" ] && apt-get autoremove "$packagesToRemove" -y
 apt-get update && apt-get upgrade -y
+ls -lahFt --full-time /var/lib/dpkg/info/*.list > packages-afterupdate.log
