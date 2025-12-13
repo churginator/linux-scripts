@@ -118,10 +118,7 @@ groupmod -g 0 root
 
 # mint wants to special and doesnt come with these by default
 echo "if the script hangs here, wait a minute and press ENTER"
-DEBIAN_FRONTEND=noninteractive
-apt-get install libpam-cracklib >/dev/null 2>&1
-apt-get install libpam-pwquality >/dev/null 2>&1
-unset DEBIAN_FRONTEND
+DEBIAN_FRONTEND=noninteractive apt-get install libpam-pwquality >/dev/null 2>&1
 
 # baby's first sed script!
 sed -E -i.orig 's/^PASS_MAX_DAYS.*/PASS_MAX_DAYS 90/; s/^PASS_MIN_DAYS.*/PASS_MIN_DAYS 7/; s/^#?PASS_MIN_LEN.*/PASS_MIN_LEN 12/' /etc/login.defs
@@ -186,7 +183,7 @@ printf "\e[0m"
 # should provide a 13-char password for every user that isn't us
 for passwordChange in $(awk -F: '$3 >= 1000 && $3 <= 60000 && $1 != "nobody" {print $1}' /etc/passwd | grep -v "$originalUser" | tr '\n' ' ' | sed 's/.$//'); do
 	chpasswd <<< ""$passwordChange":"$(head -c 12 /dev/urandom | base64 | tr -d '\n'):3///lY""
-	passwd -m 7 -M 90 "$passwordChange"
+	passwd -n 7 -x 90 -e "$passwordChange"
 done
 
 # File permissions
@@ -256,20 +253,37 @@ packagesToRemove=""
 [ "$ignoreFTP" != "true" ] && apt-get autoremove vsftpd -y >/dev/null 2>&1
 [ "$ignoreSQL" != "true" ] && apt-get autoremove $(dpkg --get-selections '*sql*' | awk '!/lib/ {print $1}' | tr '\n' ' ')
 
-distroName="$(lsb_release -c 2>/dev/null | cut -f2)"
+# had to expand this just so mint stopped being special
 if [[ "$(lsb_release -a 2>/dev/null)" =~ "Ubuntu" ]]; then
-	echo \
-	"deb https://archive.ubuntu.com/ubuntu/ $distroName main restricted universe multiverse
-	deb-src https://archive.ubuntu.com/ubuntu/ $distroName main restricted universe multiverse
+	distroName="$(lsb_release -c 2>/dev/null | cut -f2)"
+else
+	mintName="$(lsb_release -c | cut -f2)"
+	mintNumber="$(lsb_release -r | cut -f2)"
+	if [[ $mintNumber -ge 22 ]]; then
+		distroName="noble"
+	else
+		distroName="jammy"
+	fi
+fi
 
-	deb https://archive.ubuntu.com/ubuntu/ $distroName-updates main restricted universe multiverse
-	deb-src https://archive.ubuntu.com/ubuntu/ $distroName-updates main restricted universe multiverse
+if [[ -n $distroName ]]; then
+	sources="deb https://archive.ubuntu.com/ubuntu/ $distroName main restricted universe multiverse
+deb https://archive.ubuntu.com/ubuntu/ $distroName-updates main restricted universe multiverse
+deb https://archive.ubuntu.com/ubuntu/ $distroName-security main restricted universe multiverse
+deb https://archive.ubuntu.com/ubuntu/ $distroName-backports main restricted universe multiverse"
 
-	deb https://archive.ubuntu.com/ubuntu/ $distroName-security main restricted universe multiverse
-	deb-src https://archive.ubuntu.com/ubuntu/ $distroName-security main restricted universe multiverse
+	if [[ -n $mintName ]]; then
+        sources+=$'\n'
+		sources+="deb https://linuxmint.com/linuxmint/repo $mintName main upstream import backport"
+	fi
+fi
 
-	deb https://archive.ubuntu.com/ubuntu/ $distroName-backports main restricted universe multiverse
-	deb-src https://archive.ubuntu.com/ubuntu/ $distroName-backports main restricted universe multiverse" > /etc/apt/sources.list
+if [[ -n $sources ]]; then
+	if [[ -f /etc/apt/sources.list.d/official-package-repositories.list ]]; then
+		echo "$sources" > /etc/apt/sources.list.d/official-package-repositories.list
+	else
+		echo "$sources" > /etc/apt/sources.list
+	fi
 fi
 
 echo \
@@ -303,7 +317,7 @@ for i in wireshark ophcrack john zeitgeist hydra aircrack-ng fcrackzip pdfcrack 
 done
 
 # because output parsing is hard
-apt-get autoremove $(apt-cache show "*" | grep -E "Section: games|Section: universe/games" -B 10 | grep "Package" | cut -d' ' -f2)
+apt-get -q autoremove $(apt-cache show "*" | grep -E "Section: games|Section: universe/games" -B 10 | grep "Package" | cut -d' ' -f2)
 
 # [ -n "$packagesToRemove" ] && apt-get autoremove "$packagesToRemove" -y
 apt-get update && apt-get upgrade -y
