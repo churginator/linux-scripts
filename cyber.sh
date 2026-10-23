@@ -16,8 +16,21 @@ read -p 'Press ENTER once the forensics have been done. '
 unset REPLY
 
 echo -en "Out of the following, which services are required as specified in the README?\nApache, Nginx, FTP, SQL, Printing\nRespond in a space-delimited list: "; read requiredServices
-read -p "Enter a space-delimited list of all authorized users (including administrators): " -a authorizedUsers
-read -p "Enter a space-delimited list of all authorized administrators: " -a authorizedAdmins
+
+# Gets all users from either file or stdin
+if [[ -f users-list.txt ]]; then
+	mapfile authorizedUsers < users-list.txt
+else
+	read -p "Enter a space-delimited list of all authorized users (including administrators): " -a authorizedUsers
+fi
+
+# Gets admins specifically
+if [[ -f admins-list.txt ]]; then
+	mapfile authorizedAdmins < admins-list.txt
+else
+	read -p "Enter a space-delimited list of all authorized administrators: " -a authorizedAdmins
+fi
+
 read -p "Enter any users that need to be added in a space-delimited list (user:group): " -a notPresentUsers
 
 # there has GOT to be a better way to do this
@@ -30,8 +43,9 @@ grep -qi "printing" <<< "$requiredServices" && ignoreCups=true
 
 # --- Actual stuff begins here ---
 
+
 # nightmare nightmare nightmare
-find / -name "*.mp3" -type f -delete 2>/dev/null
+find /home -name "*.mp3" -type f -delete 2>/dev/null
 find /home -name "*.ogg" -type f -delete 2>/dev/null
 find /home -name "*.mp4" -type f -delete 2>/dev/null
 
@@ -51,44 +65,42 @@ ufw deny in from ::1
 
 ufw enable
 
-#[ "$ignoreApache" == "true" -o "$ignoreNginx" == "true" ] && { ufw allow http; ufw allow https; }
-#[ "$ignoreFTP" == "true" ] && { ufw allow ftp; ufw allow sftp; ufw allow saft; ufw allow ftps-data ; ufw allow ftps; }
-#[ "$ignoreSQL" == "true" ] && { ufw allow ms-sql-s; ufw allow ms-sql-m; ufw allow mysql; ufw allow mysql-proxy; }
-#[ "$ignoreCups" == "true" ] && { ufw allow ipp; ufw allow printer; ufw allow cups; }
-
 # Users shenanigans
 
+# Gets every human user from /etc/passwd, filters out ourselves, and cleans up the output
 currentUsers=$(awk -F: '$3 >= 1000 && $3 <= 60000 && $1 != "nobody" {print $1}' /etc/passwd | grep -v "$originalUser" | tr '\n' ' ' | sed 's/.$//')
+
+# We assume every user is bad until we prune out the good ones
 read -r -a badUsers <<< "$currentUsers"
 
+# Ditto for admins
 currentAdmins=$(getent group sudo | cut -d: -f4 | tr ',' ' ')
 read -r -a badAdmins <<< "$currentAdmins"
 
-# is this performant? no, but we don't care
-# and unreadable too!
-for confirmedOGUser in "${authorizedUsers[@]}"; do
+# Loop to prune out good users so we don't remove them
+for authorizedUser in "${authorizedUsers[@]}"; do
         for i in "${!badUsers[@]}"; do
-                if [[ ${badUsers[i]} = $confirmedOGUser ]]; then
+                if [[ ${badUsers[i]} = $authorizedUser ]]; then
                         unset 'badUsers[i]'
+			# If we don't do this assignment it doesn't work. I have no idea why
                         badUsers=("${badUsers[@]}")
                 fi
         done
 done
 
-for confirmedOGAdmin in "${authorizedAdmins[@]}"; do
+# Ditto for admins
+for authorizedAdmin in "${authorizedAdmins[@]}"; do
         for i in "${!badAdmins[@]}"; do
-                if [[ ${badAdmins[i]} = $confirmedOGAdmin ]] || [[ ${badAdmins[i]} = $originalUser ]]; then
+                if [[ ${badAdmins[i]} = $authorizedAdmin ]] || [[ ${badAdmins[i]} = $originalUser ]]; then
                         unset 'badAdmins[i]'
                         badAdmins=("${badAdmins[@]}")
                 fi
         done
 done
 
-# keeping code dry? who needs that
-# on a serious note, (trying to) passing arrays to bash functions is just cancer
-
-for conglomerate in ${notPresentUsers[@]}; do
-	IFS=':' read userToAdd groupOfUser <<< "$conglomerate"
+# Adds missing users (also to their group, if applicable)
+for notPresentUserRaw in ${notPresentUsers[@]}; do
+	IFS=':' read userToAdd groupOfUser <<< "$notPresentUserRaw"
 	useradd -m "$userToAdd"
 	getent group "$groupOfUser" >/dev/null 2>&1 || groupadd "$groupOfUser"
 	usermod -aG "$groupOfUser" "$userToAdd"
@@ -101,22 +113,24 @@ for userToDelete in ${badUsers[@]}; do
 	echo "Deleted $userToDelete with UID $deletedUid" >> users.log
 done
 
+# Ditto for admins
 for adminToNuke in ${badAdmins[@]}; do
 	gpasswd --delete "$adminToNuke" sudo
 	echo "Removed $userToDelete from group sudo" >> users.log
 done
 
-# non-root uid/gid 0 users/groups
+# Purges non-root uid/gid 0 users/groups (root impersonators)
 userdel -r "$(grep ":0:" /etc/passwd | grep -v "root")" 2>/dev/null
 groupdel "$(grep ":0:" /etc/group | grep -v "root")" 2>/dev/null
 
+# Ensures root does actually have uid + gid 0
 usermod -u 0 root
 usermod -g 0 root
 groupmod -g 0 root
 
 # Password Policy
 
-# mint wants to special and doesnt come with these by default
+# Mint is special and doesn't have pwquality by default, here we install it
 echo "if the script hangs here, wait a minute and press ENTER"
 DEBIAN_FRONTEND=noninteractive apt-get install libpam-pwquality >/dev/null 2>&1
 
@@ -126,6 +140,7 @@ sed -E -i.orig 's/^PASS_MAX_DAYS.*/PASS_MAX_DAYS 90/; s/^PASS_MIN_DAYS.*/PASS_MI
 # lock the root account
 passwd -l root
 
+# PAM
 cat > /etc/pam.d/common-password << EOF
 password	requisite	pam_pwquality.so retry=3 minlen=12 ucredit=-1 lcredit=-1 dcredit=-1 ocredit=-1 difok=3
 password 	requisite	pam_pwhistory.so remember=99 use_authtok
@@ -144,6 +159,7 @@ auth	required	pam_permit.so
 auth	sufficient	pam_faillock.so authsucc audit deny=5
 EOF
 
+# SSH
 chown root:root /etc/ssh/sshd_config
 chmod 0600 /etc/ssh/sshd_config
 
@@ -173,12 +189,13 @@ PermitUserEnvironment no
 UsePAM yes
 EOF
 
-printf "\e[0;31m"
+# Checks for any suspicious lines in sudoers or sudoers.d
+printf "\e[0;31m" # set red text
 grep -rPi --color=never -- '^\h*Defaults\h+([^#\n\r]+,\h*)?!use_pty\b' /etc/sudoers*
 grep -r --color=never "^[^#].*NOPASSWD" /etc/sudoers*
 grep -r --color=never "^[^#].*\!authenticate" /etc/sudoers*
 sudo -V | grep --color=never "Authentication timestamp timeout:"
-printf "\e[0m"
+printf "\e[0m" # unset red text
 
 # should provide a 13-char password for every user that isn't us
 for passwordChange in $(awk -F: '$3 >= 1000 && $3 <= 60000 && $1 != "nobody" {print $1}' /etc/passwd | grep -v "$originalUser" | tr '\n' ' ' | sed 's/.$//'); do
@@ -266,14 +283,14 @@ else
 	fi
 fi
 
-if [[ -n $distroName ]]; then
-	sources="deb https://archive.ubuntu.com/ubuntu/ $distroName main restricted universe multiverse
-deb https://archive.ubuntu.com/ubuntu/ $distroName-updates main restricted universe multiverse
-deb https://archive.ubuntu.com/ubuntu/ $distroName-security main restricted universe multiverse
-deb https://archive.ubuntu.com/ubuntu/ $distroName-backports main restricted universe multiverse"
+if [[ -n $distroName ]]; then sources=""
+	sources+="deb https://archive.ubuntu.com/ubuntu/ $distroName main restricted universe multiverse\n"
+	sources+="deb https://archive.ubuntu.com/ubuntu/ $distroName-updates main restricted universe multiverse\n"
+	sources+="deb https://archive.ubuntu.com/ubuntu/ $distroName-security main restricted universe multiverse\n"
+	sources+="deb https://archive.ubuntu.com/ubuntu/ $distroName-backports main restricted universe multiverse\n"
 
 	if [[ -n $mintName ]]; then
-        sources+=$'\n'
+		sources+=$'\n'
 		sources+="deb https://linuxmint.com/linuxmint/repo $mintName main upstream import backport"
 	fi
 fi
@@ -281,6 +298,7 @@ fi
 if [[ -n $sources ]]; then
 	if [[ -f /etc/apt/sources.list.d/official-package-repositories.list ]]; then
 		echo "$sources" > /etc/apt/sources.list.d/official-package-repositories.list
+		echo "" > /etc/apt/sources.list
 	else
 		echo "$sources" > /etc/apt/sources.list
 	fi
@@ -293,11 +311,11 @@ APT::Periodic::AutocleanInterval \"1\";
 APT::Periodic::Unattended-Upgrade \"1\";" | tee /etc/apt/apt.conf.d/10periodic > /etc/apt/apt.conf.d/20auto-upgrades
 
 # mint wants to be special
-systemctl enable --now mintupdate-automation-upgrade.timer 2>/dev/null
-gsettings set com.linuxmint.updates autorefresh-days 0 2>/dev/null
-gsettings set com.linuxmint.updates autorefresh-hours 2 2>/dev/null
-gsettings set com.linuxmint.updates autorefresh-minutes 0 2>/dev/null
-gsettings set com.linuxmint.updates refresh-schedule-enabled true 2>/dev/null
+mintupdate-automation upgrade enable 2>/dev/null
+sudo -u "$originalUser" gsettings set com.linuxmint.updates autorefresh-days 0 2>/dev/null
+sudo -u "$originalUser" gsettings set com.linuxmint.updates autorefresh-hours 2 2>/dev/null
+sudo -u "$originalUser" gsettings set com.linuxmint.updates autorefresh-minutes 0 2>/dev/null
+sudo -u "$originalUser" gsettings set com.linuxmint.updates refresh-schedule-enabled true 2>/dev/null
 
 # untested
 if [[ "$ignoreFTP" ]]; then
@@ -312,13 +330,12 @@ if [[ "$ignoreApache" || "$ignoreNginx" ]]; then
 	done
 fi
 
-for i in wireshark ophcrack john zeitgeist hydra aircrack-ng fcrackzip pdfcrack rarcrack sipcrack irpas xprobe doona; do
+for i in nmap wireshark ophcrack john zeitgeist hydra aircrack-ng fcrackzip pdfcrack rarcrack sipcrack irpas xprobe doona; do
 	apt-get autoremove "$i" -y >/dev/null 2>&1
 done
 
 # because output parsing is hard
-apt-get -q autoremove $(apt-cache show "*" | grep -E "Section: games|Section: universe/games" -B 10 | grep "Package" | cut -d' ' -f2)
+apt-get -q autoremove $(apt-cache show "*" | grep -E "Section: games|Section: universe/games|Section: multiverse/games" -B 10 | grep "Package" | cut -d' ' -f2)
 
-# [ -n "$packagesToRemove" ] && apt-get autoremove "$packagesToRemove" -y
 apt-get update && apt-get upgrade -y
 ls -lahFt --full-time /var/lib/dpkg/info/*.list > packages-afterupdate.log
